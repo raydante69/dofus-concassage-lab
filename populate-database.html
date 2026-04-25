@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concassage Lab — Population BDD v4</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:2rem}
+    .c{max-width:800px;margin:0 auto}
+    h1{font-size:2rem;margin-bottom:.5rem}
+    .sub{color:#94a3b8;margin-bottom:2rem}
+    .card{background:#1e293b;border-radius:1rem;padding:1.5rem;margin-bottom:1rem;border:1px solid #334155}
+    .pb{width:100%;height:14px;background:#334155;border-radius:99px;overflow:hidden;margin:1rem 0}
+    .pf{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:99px;transition:width .3s}
+    .st{display:flex;justify-content:space-between;padding:.3rem 0;font-size:.9rem}
+    .sv{font-weight:700;color:#3b82f6;font-family:monospace}
+    .log{background:#0f172a;border-radius:.5rem;padding:1rem;max-height:350px;overflow-y:auto;font-family:monospace;font-size:.8rem;line-height:1.6;color:#94a3b8;margin-top:1rem}
+    .log .ok{color:#4ade80}.log .err{color:#f87171}.log .info{color:#60a5fa}
+    button{background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:white;border:none;padding:.8rem 2rem;border-radius:99px;font-size:1rem;font-weight:700;cursor:pointer;margin-top:.5rem;transition:all .2s}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 20px rgba(59,130,246,.4)}
+    .warn{background:#7c2d12;padding:1rem;border-radius:.5rem;margin-bottom:1rem;font-size:.85rem}
+    .types{display:flex;flex-wrap:wrap;gap:.5rem;margin:.5rem 0}
+    .types label{background:#334155;padding:.35rem .7rem;border-radius:.5rem;font-size:.8rem;cursor:pointer;display:inline-flex;align-items:center;gap:.3rem}
+    input[type="checkbox"]{accent-color:#3b82f6}
+    .done{color:#4ade80;font-size:1.3rem;font-weight:700;text-align:center;padding:2rem}
+    .ready{background:#065f46;color:#6ee7b7;padding:.5rem 1rem;border-radius:.5rem;text-align:center;margin-bottom:1rem;font-size:.85rem;font-weight:600}
+    .field{margin:.5rem 0}.field label{font-size:.8rem;color:#64748b;display:block;margin-bottom:.2rem}
+    .field input,.field select{width:100%;padding:.5rem;border-radius:.5rem;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-family:monospace}
+    .tabs{display:flex;gap:.5rem;margin-bottom:1rem}
+    .tabs button{padding:.5rem 1rem;border-radius:.5rem;font-size:.85rem;background:#334155;border:none;color:#94a3b8}
+    .tabs button.active{background:#3b82f6;color:white}
+  </style>
+</head>
+<body>
+<div class="c">
+  <h1>⚒️ Population BDD v4</h1>
+  <p class="sub">Équipements + Ingrédients/Ressources depuis DofusDB → Supabase</p>
+  <div class="ready">✅ Prêt — zéro dépendance</div>
+  <div class="warn">⚠️ Peut prendre 10 à 30 min pour tout importer. Ne ferme pas cet onglet !</div>
+
+  <div class="card">
+    <h3>🔑 Supabase</h3>
+    <div class="field"><label>URL</label><input id="sbUrl" value="https://eumzlpppmshfgkubyysa.supabase.co" /></div>
+    <div class="field"><label>ANON KEY</label><input id="sbKey" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bXpscHBwbXNoZmdrdWJ5eXNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMzE2NTksImV4cCI6MjA5MjYwNzY1OX0.oAxcY9MeuxOZZ5vLBgosfCo810bv_InghMWU_2Oikp0" style="font-size:.65rem" /></div>
+  </div>
+
+  <div class="card">
+    <h3>📦 Quoi importer ?</h3>
+    <div style="margin:.5rem 0">
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;cursor:pointer">
+        <input type="checkbox" id="doEquip" checked> <strong>Équipements</strong> (amulettes, anneaux, capes, chapeaux, armes, etc.)
+      </label>
+    </div>
+    <div style="margin:.5rem 0">
+      <label style="display:flex;align-items:center;gap:.5rem;font-size:.9rem;cursor:pointer">
+        <input type="checkbox" id="doResources" checked> <strong>Ressources / Ingrédients</strong> (cuirs, bois, minerais, plumes, etc.)
+      </label>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <button id="startBtn" onclick="go()">🚀 Lancer la population</button>
+    <span id="elapsed" style="font-size:.8rem;color:#64748b"></span>
+  </div>
+
+  <div class="card" id="statusCard" style="display:none">
+    <h3>📊 Progression</h3>
+    <div class="pb"><div class="pf" id="bar" style="width:0%"></div></div>
+    <div id="statsDiv"></div>
+    <div class="log" id="logBox"></div>
+  </div>
+
+  <div id="doneMsg" style="display:none" class="card done"></div>
+</div>
+
+<script>
+var DOFUSDB = 'https://api.dofusdb.fr';
+var EQUIP_TYPES = {1:'Amulette',2:'Arc',3:'Baguette',4:'Bâton',5:'Dague',6:'Épée',7:'Marteau',8:'Pelle',9:'Anneau',10:'Ceinture',11:'Bottes',16:'Chapeau',17:'Cape',19:'Hache',21:'Bouclier',22:'Faux',82:'Pioche'};
+// Resource type IDs in DofusDB
+var RESOURCE_TYPES = [38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110];
+
+var ct = {fetched:0,inserted:0,skipped:0,errors:0};
+var startTime = null;
+
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+
+function log(msg,type){
+  var box=document.getElementById('logBox');
+  var div=document.createElement('div');
+  if(type)div.className=type;
+  div.textContent=new Date().toLocaleTimeString()+' — '+msg;
+  box.appendChild(div);box.scrollTop=box.scrollHeight;
+}
+
+function updateUI(progress){
+  document.getElementById('bar').style.width=progress+'%';
+  document.getElementById('statsDiv').innerHTML=
+    '<div class="st"><span>Récupérés</span><span class="sv">'+ct.fetched+'</span></div>'+
+    '<div class="st"><span>Insérés</span><span class="sv" style="color:#4ade80">'+ct.inserted+'</span></div>'+
+    '<div class="st"><span>Déjà existants</span><span class="sv" style="color:#fbbf24">'+ct.skipped+'</span></div>'+
+    '<div class="st"><span>Erreurs</span><span class="sv" style="color:#f87171">'+ct.errors+'</span></div>';
+  if(startTime){var s=Math.round((Date.now()-startTime)/1000);document.getElementById('elapsed').textContent='Temps: '+Math.floor(s/60)+'m '+s%60+'s'}
+}
+
+function sbHeaders(key){return{'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'return=minimal'}}
+
+async function sbExists(url,key,dofusId){
+  var r=await fetch(url+'/rest/v1/items?dofus_id=eq.'+dofusId+'&select=id&limit=1',{headers:sbHeaders(key)});
+  if(!r.ok)return false;var d=await r.json();return d.length>0;
+}
+
+async function sbInsert(url,key,item){
+  var r=await fetch(url+'/rest/v1/items',{method:'POST',headers:sbHeaders(key),body:JSON.stringify(item)});
+  if(!r.ok){var t=await r.text();if(t.indexOf('23505')!==-1)return'dup';throw new Error(r.status+' '+t.substring(0,100))}
+  return'ok';
+}
+
+async function dbFetchEquip(typeIds,skip,limit){
+  var p=typeIds.map(function(t){return'typeId[$in][]='+t}).join('&');
+  var r=await fetch(DOFUSDB+'/items?'+p+'&$limit='+limit+'&$skip='+skip+'&$sort=level');
+  if(!r.ok)throw new Error('DofusDB '+r.status);return r.json();
+}
+
+async function dbFetchResources(skip,limit){
+  // Resources: typeId >= 38 (all non-equipment items that are resources)
+  var url=DOFUSDB+'/items?typeId[$in][]=38&typeId[$in][]=39&typeId[$in][]=40&typeId[$in][]=41&typeId[$in][]=42&typeId[$in][]=43&typeId[$in][]=44&typeId[$in][]=45&typeId[$in][]=46&typeId[$in][]=47&typeId[$in][]=48&typeId[$in][]=49&typeId[$in][]=50&typeId[$in][]=51&typeId[$in][]=52&typeId[$in][]=53&typeId[$in][]=54&typeId[$in][]=55&typeId[$in][]=56&typeId[$in][]=57&typeId[$in][]=58&typeId[$in][]=59&typeId[$in][]=60&typeId[$in][]=61&typeId[$in][]=62&typeId[$in][]=63&typeId[$in][]=64&typeId[$in][]=65&typeId[$in][]=66&typeId[$in][]=67&typeId[$in][]=68&typeId[$in][]=69&typeId[$in][]=70&typeId[$in][]=71&typeId[$in][]=72&typeId[$in][]=73&typeId[$in][]=74&typeId[$in][]=75&typeId[$in][]=76&typeId[$in][]=77&typeId[$in][]=78&$limit='+limit+'&$skip='+skip+'&$sort=level';
+  var r=await fetch(url);
+  if(!r.ok)throw new Error('DofusDB resources '+r.status);return r.json();
+}
+
+async function dbRecipe(itemId){
+  try{
+    var r=await fetch(DOFUSDB+'/recipes?resultId='+itemId+'&$limit=1');
+    if(!r.ok)return[];var d=await r.json();
+    if(!d.data||!d.data[0]||!d.data[0].ingredients)return[];
+    var ings=d.data[0].ingredients;var result=[];
+    for(var i=0;i<ings.length;i++){
+      var name='Item #'+ings[i].itemId;
+      try{var ir=await fetch(DOFUSDB+'/items/'+ings[i].itemId+'?$select[]=name');if(ir.ok){var id=await ir.json();name=(id.name&&id.name.fr)||name}}catch(e){}
+      result.push({n:name,q:ings[i].quantity});await sleep(50);
+    }
+    return result;
+  }catch(e){return[]}
+}
+
+async function dbMonsters(ids){
+  if(!ids||!ids.length)return[];
+  try{
+    var f=ids.slice(0,5).map(function(i){return'id[$in][]='+i}).join('&');
+    var r=await fetch(DOFUSDB+'/monsters?'+f+'&$limit=5&$select[]=name&$select[]=areas');
+    if(!r.ok)return[];var d=await r.json();
+    return(d.data||[]).map(function(m){
+      var name=(m.name&&m.name.fr)||'?';
+      var areas=(m.areas||[]).map(function(a){return(a.name&&a.name.fr)||''}).filter(Boolean).join(', ');
+      return areas?name+' ('+areas+')':name;
+    }).filter(Boolean);
+  }catch(e){return[]}
+}
+
+function parseEffects(effects){
+  if(!effects||!Array.isArray(effects))return[];
+  return effects.filter(function(e){return e.characteristic!==undefined&&(e.from||e.to)})
+    .map(function(e){return{c:e.characteristic,f:e.from||0,t:e.to||0}});
+}
+
+async function processCategory(sbUrl,sbKey,fetchFn,totalItems,categoryName,fetchRecipes){
+  var BS=50,totalBatches=Math.ceil(totalItems/BS);
+  for(var b=0;b<totalBatches;b++){
+    var skip=b*BS;
+    log('📦 '+categoryName+' batch '+(b+1)+'/'+totalBatches+'…','info');
+    try{
+      var res=await fetchFn(skip,BS);var items=res.data||[];ct.fetched+=items.length;
+      for(var i=0;i<items.length;i++){
+        var raw=items[i];
+        var itemName=(raw.name&&raw.name.fr)||('Item #'+raw.id);
+        try{var exists=await sbExists(sbUrl,sbKey,raw.id);if(exists){ct.skipped++;continue}}catch(e){}
+        var effects=parseEffects(raw.effects);
+        var typeName=(raw.type&&raw.type.name&&raw.type.name.fr)||'Ressource';
+        var desc=(raw.description&&raw.description.fr)||'';
+        var imgUrl=raw.img||null;
+        var recipe=[];
+        if(fetchRecipes&&raw.hasRecipe){recipe=await dbRecipe(raw.id);await sleep(30)}
+        var drops=[];
+        if(raw.dropMonsterIds&&raw.dropMonsterIds.length){drops=await dbMonsters(raw.dropMonsterIds);await sleep(30)}
+        try{
+          var result=await sbInsert(sbUrl,sbKey,{dofus_id:raw.id,name:itemName,level:raw.level||1,type:typeName,description:desc,img_url:imgUrl,effects:effects,recipe:recipe,drops:drops});
+          if(result==='dup'){ct.skipped++}else{ct.inserted++;if(ct.inserted%25===0)log('✅ '+ct.inserted+' insérés ('+itemName+')','ok')}
+        }catch(e){ct.errors++;if(ct.errors<=20)log('❌ '+itemName+': '+e.message,'err')}
+        if(i%5===0)await sleep(30);
+      }
+      var progress=Math.round(((b+1)/totalBatches)*100);
+      updateUI(progress);await sleep(150);
+    }catch(e){log('❌ Erreur batch '+(b+1)+': '+e.message,'err');ct.errors++;await sleep(500)}
+  }
+}
+
+async function go(){
+  var sbUrl=document.getElementById('sbUrl').value.trim();
+  var sbKey=document.getElementById('sbKey').value.trim();
+  if(!sbUrl||!sbKey){alert('Remplis URL et clé !');return}
+
+  var doEquip=document.getElementById('doEquip').checked;
+  var doRes=document.getElementById('doResources').checked;
+  if(!doEquip&&!doRes){alert('Sélectionne au moins une catégorie !');return}
+
+  document.getElementById('startBtn').disabled=true;
+  document.getElementById('startBtn').textContent='⏳ En cours…';
+  document.getElementById('statusCard').style.display='block';
+  startTime=Date.now();ct={fetched:0,inserted:0,skipped:0,errors:0};
+
+  // Test Supabase
+  log('🔌 Test Supabase…','info');
+  try{var tr=await fetch(sbUrl+'/rest/v1/rune_prices?select=name&limit=1',{headers:sbHeaders(sbKey)});if(!tr.ok)throw new Error('HTTP '+tr.status);log('✅ Supabase OK','ok')}
+  catch(e){log('❌ Supabase : '+e.message,'err');alert('Connexion Supabase échouée');document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='🚀 Réessayer';return}
+
+  // ─── ÉQUIPEMENTS ───
+  if(doEquip){
+    log('🔌 Comptage équipements…','info');
+    var equipTypes=Object.keys(EQUIP_TYPES);
+    try{
+      var cr=await dbFetchEquip(equipTypes,0,1);var totalEquip=cr.total||0;
+      log('📊 '+totalEquip+' équipements trouvés','ok');
+      await processCategory(sbUrl,sbKey,function(skip,limit){return dbFetchEquip(equipTypes,skip,limit)},totalEquip,'Équipements',true);
+      log('🎉 Équipements terminés !','ok');
+    }catch(e){log('❌ Équipements : '+e.message,'err')}
+  }
+
+  // ─── RESSOURCES / INGRÉDIENTS ───
+  if(doRes){
+    log('🔌 Comptage ressources…','info');
+    try{
+      var cr2=await dbFetchResources(0,1);var totalRes=cr2.total||0;
+      log('📊 '+totalRes+' ressources trouvées','ok');
+      await processCategory(sbUrl,sbKey,function(skip,limit){return dbFetchResources(skip,limit)},totalRes,'Ressources',false);
+      log('🎉 Ressources terminées !','ok');
+    }catch(e){log('❌ Ressources : '+e.message,'err')}
+  }
+
+  // Fini
+  updateUI(100);
+  var sec=Math.round((Date.now()-startTime)/1000);
+  log('🏁 TOUT TERMINÉ en '+Math.floor(sec/60)+'m '+(sec%60)+'s !','ok');
+  log(ct.inserted+' insérés · '+ct.skipped+' ignorés · '+ct.errors+' erreurs','ok');
+  document.getElementById('doneMsg').style.display='block';
+  document.getElementById('doneMsg').innerHTML='🎉 Population terminée !<br><br><span style="font-size:1rem;color:#94a3b8"><strong>'+ct.inserted+'</strong> items insérés (équipements + ressources)<br>Rafraîchis ton site !</span>';
+  document.getElementById('startBtn').textContent='✅ Terminé !';
+}
+</script>
+</body>
+</html>
