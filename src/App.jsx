@@ -316,7 +316,7 @@ function Dash(props) {
   var [done, setDone] = useState(false)
   var [filter, setFilter] = useState('')
   var [page, setPage] = useState(1)
-  var [bp, setBp] = useState(getBuyPrices())
+  var [bp, setBp] = useState(getBP())
   var PS = 100
 
   useEffect(function() {
