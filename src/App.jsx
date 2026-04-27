@@ -163,13 +163,13 @@ function Inner() {
               <span className="text-[9px] text-slate-400">%</span>
             </div>
 
-            {/* Sync */}
-            <button onClick={syncHdv} disabled={syncing} title="Synchroniser les prix HDV depuis KamaMaster"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all"
-              style={{ background: '#0F1B3D', color: 'white', opacity: syncing ? .6 : 1 }}>
-              <RefreshCw className={'w-3.5 h-3.5' + (syncing ? ' animate-spin' : '')} />
-              <span className="hidden sm:inline">Sync HDV</span>
-            </button>
+            {/* Sync — CORS : uniquement via node populate.js */}
+            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-semibold"
+              style={{ background: 'rgba(15,27,61,.06)', color: '#4B5870' }}
+              title="Sync via : node populate.js hdv NomServeur">
+              <RefreshCw className="w-3 h-3 opacity-50" />
+              <span>node populate.js hdv {'{serveur}'}</span>
+            </div>
 
             {/* Status */}
             <div className="hidden lg:flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold"
@@ -1036,12 +1036,11 @@ function RuneV({ rp, hdv, server, coeff, onCoeff, onSync, syncing }) {
     <div className="animate-fadeUp">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-3xl font-bold" style={{ fontFamily: FD }}>Prix des Runes</h2>
-        <button onClick={onSync} disabled={syncing}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all text-white"
-          style={{ background: '#0F1B3D', opacity: syncing ? .6 : 1 }}>
-          <RefreshCw className={'w-3.5 h-3.5' + (syncing ? ' animate-spin' : '')} />
-          Sync KamaMaster
-        </button>
+        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold"
+          style={{ background: 'rgba(15,27,61,.06)', color: '#4B5870' }}>
+          <RefreshCw className="w-3.5 h-3.5 opacity-40" />
+          <code className="text-[10px]">node populate.js hdv {server}</code>
+        </div>
       </div>
       <p className="text-sm text-slate-500 mb-1">Serveur : {server}</p>
       <p className="text-xs text-slate-400 mb-5">
