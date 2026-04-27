@@ -196,53 +196,103 @@ function Inner() {
 
 // ─── Sorts encyclopédie ──────────────────────────────────────
 var SORT_OPTS = [
-  { k: 'level-desc', label: 'Niveau ↓', field: 'level', asc: false },
-  { k: 'level-asc',  label: 'Niveau ↑', field: 'level', asc: true  },
-  { k: 'name-asc',   label: 'Nom A→Z',  field: 'name',  asc: true  },
-  { k: 'name-desc',  label: 'Nom Z→A',  field: 'name',  asc: false },
-  { k: 'type-asc',   label: 'Type A→Z', field: 'type',  asc: true  },
+  { k: 'level-desc', label: 'Niveau ↓',    field: 'level', asc: false },
+  { k: 'level-asc',  label: 'Niveau ↑',    field: 'level', asc: true  },
+  { k: 'name-asc',   label: 'Nom A→Z',     field: 'name',  asc: true  },
+  { k: 'name-desc',  label: 'Nom Z→A',     field: 'name',  asc: false },
+  { k: 'type-asc',   label: 'Type A→Z',    field: 'type',  asc: true  },
+  { k: 'gain-desc',  label: 'Gain ↓',      ranked: true },
+  { k: 'roi-desc',   label: 'ROI ↓',       ranked: true },
+  { k: 'bris-desc',  label: 'Brisage ↓',   ranked: true },
 ]
 
 // ─── ENCYCLOPÉDIE ────────────────────────────────────────────
 function Ency({ hdv, rp, coeff, show }) {
-  var [items, setItems]   = useState([])
-  var [total, setTotal]   = useState(0)
-  var [page, setPage]     = useState(1)
-  var [loading, setLoading] = useState(true)
-  var [query, setQuery]   = useState('')
-  var [lvMin, setLvMin]   = useState(1)
-  var [lvMax, setLvMax]   = useState(200)
-  var [typeF, setTypeF]   = useState('all')
-  var [sort, setSort]     = useState('level-desc')
-  var [sel, setSel]       = useState(null)
+  var [items, setItems]       = useState([])
+  var [total, setTotal]       = useState(0)
+  var [page, setPage]         = useState(1)
+  var [rPage, setRPage]       = useState(1)
+  var [loading, setLoading]   = useState(true)
+  var [query, setQuery]       = useState('')
+  var [lvMin, setLvMin]       = useState(1)
+  var [lvMax, setLvMax]       = useState(200)
+  var [typeF, setTypeF]       = useState('all')
+  var [sort, setSort]         = useState('level-desc')
+  var [sel, setSel]           = useState(null)
+  var [selIngr, setSelIngr]   = useState(null)
+  var [allItems, setAllItems] = useState([])
+  var [allLoaded, setAllLoaded] = useState(false)
+  var [allLoading, setAllLoading] = useState(false)
 
   var so = SORT_OPTS.find(o => o.k === sort) || SORT_OPTS[0]
+  var isRanked = !!so.ranked
+
+  useEffect(() => {
+    if (isRanked && !allLoaded && !allLoading) {
+      setAllLoading(true)
+      getAllItems().then(d => { setAllItems(d || []); setAllLoaded(true); setAllLoading(false) })
+    }
+  }, [isRanked])
 
   var doLoad = useCallback(() => {
+    if (isRanked) return
     setLoading(true)
     getItems(query, lvMin, lvMax, typeF, page, so.field, so.asc).then(r => {
       setItems(r.data || []); setTotal(r.count || 0); setLoading(false)
     }).catch(() => setLoading(false))
-  }, [query, lvMin, lvMax, typeF, page, sort])
+  }, [query, lvMin, lvMax, typeF, page, sort, isRanked])
 
   useEffect(() => { var t = setTimeout(doLoad, 300); return () => clearTimeout(t) }, [doLoad])
 
-  function goIngredient(ankamaId, name) {
-    if (ankamaId) {
-      getItemByAnkamaId(ankamaId).then(item => {
-        if (item) setSel(item)
-        else show((name || 'Item #' + ankamaId) + ' — ressource non équipement', 'err')
-      })
-    } else if (name) {
-      getItemByName(name).then(item => {
-        if (item) setSel(item)
-        else show(name + ' — pas dans la base', 'err')
-      })
+  var ranked = useMemo(() => {
+    if (!isRanked) return []
+    var src = allItems
+    if (query) src = src.filter(it => it.name.toLowerCase().includes(query.toLowerCase()))
+    if (typeF !== 'all') src = src.filter(it => it.type === typeF)
+    src = src.filter(it => it.level >= lvMin && it.level <= lvMax)
+    var res = []
+    for (var it of src) {
+      var runes = computeRuneBreakdown(it.effects || [], it.level, coeff)
+      var brisVal = computeEstimatedValue(runes, rp)
+      if (brisVal <= 0) continue
+      var hdvPrice = hdv[it.ankama_id]?.price || 0
+      var craftCost = 0, craftKnown = (it.recipe || []).length > 0
+      for (var r of (it.recipe || [])) {
+        var p2 = hdv[r.ankama_id]?.price || 0
+        if (!p2) { craftKnown = false; break }
+        craftCost += p2 * r.quantity
+      }
+      var bestCost = hdvPrice > 0 && craftCost > 0 ? Math.min(hdvPrice, craftCost)
+                   : hdvPrice > 0 ? hdvPrice : craftCost > 0 ? craftCost : 0
+      var profit = bestCost > 0 ? brisVal - bestCost : null
+      var roi    = bestCost > 0 ? ((brisVal - bestCost) / bestCost) * 100 : null
+      res.push({ item: it, brisVal, hdvPrice, craftCost, craftKnown, bestCost, profit, roi })
     }
+    if (sort === 'roi-desc')  res.sort((a, b) => (b.roi ?? -Infinity) - (a.roi ?? -Infinity))
+    else if (sort === 'gain-desc') res.sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity))
+    else res.sort((a, b) => b.brisVal - a.brisVal)
+    return res
+  }, [allItems, hdv, rp, coeff, sort, query, typeF, lvMin, lvMax, isRanked])
+
+  function goIngredient(ankamaId, name) {
+    if (!ankamaId) return
+    getItemByAnkamaId(ankamaId).then(item => {
+      if (item) setSel(item)
+      else {
+        var hdvItem = hdv[ankamaId]
+        if (hdvItem) setSelIngr({ ankama_id: ankamaId, ...hdvItem })
+        else show((name || 'Item #' + ankamaId) + ' — introuvable', 'err')
+      }
+    })
   }
 
-  var tp = Math.ceil(total / 100) || 1
-  if (sel) return <Detail item={sel} onBack={() => setSel(null)} hdv={hdv} rp={rp} coeff={coeff} onIngredientClick={goIngredient} />
+  var tp   = Math.ceil(total / 100) || 1
+  var RPS  = 50
+  var rTp  = Math.ceil(ranked.length / RPS) || 1
+  var rRows = ranked.slice((rPage - 1) * RPS, rPage * RPS)
+
+  if (selIngr) return <IngredientDetail item={selIngr} hdv={hdv} onBack={() => setSelIngr(null)} onIngredientClick={goIngredient} />
+  if (sel)     return <Detail item={sel} onBack={() => setSel(null)} hdv={hdv} rp={rp} coeff={coeff} onIngredientClick={goIngredient} />
 
   return (
     <div className="animate-fadeUp">
@@ -251,35 +301,37 @@ function Ency({ hdv, rp, coeff, show }) {
           Encyclopédie <span className="bg-clip-text text-transparent"
             style={{ backgroundImage: 'linear-gradient(120deg,#2D4AAF,#7E57C2 60%,#C49A3B)' }}>Dofus</span>
         </h1>
-        <p className="text-slate-500 mt-2 text-sm">{total.toLocaleString('fr')} équipements</p>
+        <p className="text-slate-500 mt-2 text-sm">
+          {isRanked ? ranked.length.toLocaleString('fr') + ' équipements avec valeur brisage' : total.toLocaleString('fr') + ' équipements'}
+        </p>
       </div>
 
       {/* Filtres */}
       <div className="max-w-3xl mx-auto mb-6 space-y-3">
         <div className="relative">
           <Search className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input value={query} onChange={e => { setQuery(e.target.value); setPage(1) }}
+          <input value={query} onChange={e => { setQuery(e.target.value); setPage(1); setRPage(1) }}
             placeholder="Rechercher un équipement…"
             className="w-full pl-11 pr-4 py-3 rounded-2xl bg-white/80 backdrop-blur-xl border border-white shadow-lg text-sm font-medium outline-none focus:ring-2 focus:ring-blue-300/60" />
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-center text-xs text-slate-600">
           <label className="flex items-center gap-1">Niv
             <input type="number" value={lvMin} min={1} max={200}
-              onChange={e => { setLvMin(+e.target.value || 1); setPage(1) }}
+              onChange={e => { setLvMin(+e.target.value || 1); setPage(1); setRPage(1) }}
               className="w-12 px-1.5 py-1 rounded-lg bg-white border border-slate-200 text-center font-semibold" />
           </label>
           <span>—</span>
           <input type="number" value={lvMax} min={1} max={200}
-            onChange={e => { setLvMax(+e.target.value || 200); setPage(1) }}
+            onChange={e => { setLvMax(+e.target.value || 200); setPage(1); setRPage(1) }}
             className="w-12 px-1.5 py-1 rounded-lg bg-white border border-slate-200 text-center font-semibold" />
-          <select value={typeF} onChange={e => { setTypeF(e.target.value); setPage(1) }}
+          <select value={typeF} onChange={e => { setTypeF(e.target.value); setPage(1); setRPage(1) }}
             className="px-2 py-1 rounded-lg bg-white border border-slate-200 font-semibold">
             <option value="all">Tous types</option>
             {EQUIPMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
           </select>
           <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-slate-200">
             <ArrowUpDown className="w-3 h-3 text-slate-400" />
-            <select value={sort} onChange={e => { setSort(e.target.value); setPage(1) }}
+            <select value={sort} onChange={e => { setSort(e.target.value); setPage(1); setRPage(1) }}
               className="text-xs font-semibold bg-transparent outline-none">
               {SORT_OPTS.map(o => <option key={o.k} value={o.k}>{o.label}</option>)}
             </select>
@@ -287,16 +339,103 @@ function Ency({ hdv, rp, coeff, show }) {
         </div>
       </div>
 
-      {loading && <Spin text="Chargement…" />}
-      {!loading && items.length === 0 && <Emp icon="📖" title="Aucun résultat" msg="Modifie les filtres." />}
-      {!loading && items.length > 0 && (
+      {/* Mode classement rentabilité */}
+      {isRanked && (
         <div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-            {items.map(item => (
-              <IC key={item.id} item={item} hdv={hdv} rp={rp} coeff={coeff} onClick={() => setSel(item)} />
-            ))}
-          </div>
-          <Pag page={page} tp={tp} total={total} onPage={p => { setPage(p); window.scrollTo(0, 0) }} />
+          {(allLoading || !allLoaded) && <Spin text="Calcul de la rentabilité…" />}
+          {allLoaded && ranked.length === 0 && <Emp icon="💡" title="Aucun résultat" msg="Sync HDV requis pour calculer les gains." />}
+          {allLoaded && ranked.length > 0 && (
+            <div>
+              <div className="bg-white/70 backdrop-blur-xl rounded-3xl border border-white shadow-xl overflow-hidden mb-4">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100">
+                        <th className="px-3 py-3 w-8">#</th>
+                        <th className="px-3 py-3">Équipement</th>
+                        <th className="px-3 py-3 text-right">Niv</th>
+                        <th className="px-3 py-3 text-right">HDV achat</th>
+                        <th className="px-3 py-3 text-right">Coût craft</th>
+                        <th className="px-3 py-3 text-right">Val. brisage</th>
+                        <th className="px-3 py-3 text-right">Gain estimé</th>
+                        <th className="px-3 py-3 text-right">ROI</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rRows.map((r, idx) => {
+                        var rank = (rPage - 1) * RPS + idx + 1
+                        var icon = TYPE_ICONS[r.item.type] || '📦'
+                        return (
+                          <tr key={r.item.id || r.item.ankama_id}
+                            className="border-b border-slate-50 last:border-0 hover:bg-blue-50/40 cursor-pointer transition"
+                            onClick={() => setSel(r.item)}>
+                            <td className="px-3 py-2.5 text-xs font-bold text-slate-400">{rank}</td>
+                            <td className="px-3 py-2.5">
+                              <div className="flex items-center gap-2">
+                                {r.item.img_url
+                                  ? <img src={r.item.img_url} alt="" className="w-8 h-8 object-contain rounded"
+                                      onError={e => { e.target.style.display = 'none' }} />
+                                  : <span className="text-lg">{icon}</span>}
+                                <div>
+                                  <div className="font-semibold text-xs">{r.item.name}</div>
+                                  <div className="text-[10px] text-slate-400">{r.item.type}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-xs font-semibold text-slate-500">{r.item.level}</td>
+                            <td className="px-3 py-2.5 text-right text-xs" style={{ fontFamily: MN, color: '#2D4AAF' }}>
+                              {r.hdvPrice > 0 ? r.hdvPrice.toLocaleString('fr') : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-xs" style={{ fontFamily: MN, color: '#7E57C2' }}>
+                              {r.craftKnown && r.craftCost > 0 ? r.craftCost.toLocaleString('fr') : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-right text-xs font-bold" style={{ fontFamily: MN, color: '#8B6914' }}>
+                              {Math.round(r.brisVal).toLocaleString('fr')}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              {r.profit !== null
+                                ? <span className="font-bold text-xs" style={{ fontFamily: MN, color: r.profit >= 0 ? '#047857' : '#B91C1C' }}>
+                                    {r.profit >= 0 ? '+' : ''}{Math.round(r.profit).toLocaleString('fr')}
+                                  </span>
+                                : <span className="text-[10px] text-slate-300">—</span>}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              {r.roi !== null
+                                ? <span className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                                    style={{ background: r.roi >= 0 ? 'rgba(16,185,129,.12)' : 'rgba(239,68,68,.12)',
+                                             color: r.roi >= 0 ? '#047857' : '#B91C1C' }}>
+                                    {r.roi >= 0 ? '+' : ''}{r.roi.toFixed(0)}%
+                                  </span>
+                                : <span className="text-[10px] text-slate-300">—</span>}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <Pag page={rPage} tp={rTp} total={ranked.length} onPage={p => { setRPage(p); window.scrollTo(0, 0) }} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Mode normal (cartes paginées) */}
+      {!isRanked && (
+        <div>
+          {loading && <Spin text="Chargement…" />}
+          {!loading && items.length === 0 && <Emp icon="📖" title="Aucun résultat" msg="Modifie les filtres." />}
+          {!loading && items.length > 0 && (
+            <div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                {items.map(item => (
+                  <IC key={item.id} item={item} hdv={hdv} rp={rp} coeff={coeff} onClick={() => setSel(item)} />
+                ))}
+              </div>
+              <Pag page={page} tp={tp} total={total} onPage={p => { setPage(p); window.scrollTo(0, 0) }} />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -310,7 +449,6 @@ function IC({ item, hdv, rp, coeff, onClick }) {
   var brisVal = computeEstimatedValue(runes, rp)
   var hdvPrice = hdv[item.ankama_id]?.price || 0
 
-  // Craft cost
   var craftCost = 0, craftKnown = (item.recipe || []).length > 0
   for (var r of (item.recipe || [])) {
     var p = hdv[r.ankama_id]?.price || 0
@@ -318,8 +456,9 @@ function IC({ item, hdv, rp, coeff, onClick }) {
     craftCost += p * r.quantity
   }
 
-  var bestCost = hdvPrice && craftCost ? Math.min(hdvPrice, craftCost) : (hdvPrice || craftCost)
+  var bestCost = hdvPrice > 0 && craftCost > 0 ? Math.min(hdvPrice, craftCost) : (hdvPrice || craftCost)
   var profit = bestCost > 0 && brisVal > 0 ? brisVal - bestCost : null
+  var roi    = bestCost > 0 && brisVal > 0 ? ((brisVal - bestCost) / bestCost) * 100 : null
 
   return (
     <button onClick={onClick}
@@ -331,23 +470,133 @@ function IC({ item, hdv, rp, coeff, onClick }) {
               onError={e => { e.target.style.display = 'none' }} />
           : <span className="text-2xl">{icon}</span>}
       </div>
-      <div className="text-center w-full">
+      <div className="text-center w-full space-y-0.5">
         <div className="font-bold text-[11px] leading-tight truncate">{item.name}</div>
-        <div className="text-[9px] text-slate-500 mt-0.5">{item.type} · Niv.{item.level}</div>
+        <div className="text-[9px] text-slate-500">{item.type} · Niv.{item.level}</div>
         {hdvPrice > 0 && (
-          <div className="text-[9px] text-blue-600 font-semibold mt-0.5">
+          <div className="text-[9px] text-blue-600 font-semibold">
             HDV : {hdvPrice.toLocaleString('fr')} k
           </div>
         )}
+        {craftKnown && craftCost > 0 && (
+          <div className="text-[9px] text-purple-600 font-semibold">
+            Craft : {craftCost.toLocaleString('fr')} k
+          </div>
+        )}
         {brisVal > 0 && (
-          <div className="text-[9px] font-bold mt-1 px-2 py-0.5 rounded-full inline-block"
-            style={{ background: profit !== null && profit >= 0 ? 'rgba(16,185,129,.15)' : 'rgba(196,154,59,.12)',
-                     color: profit !== null && profit >= 0 ? '#047857' : '#8B6914' }}>
-            {profit !== null ? (profit >= 0 ? '+' : '') + Math.round(profit).toLocaleString('fr') + ' k' : '≈' + Math.round(brisVal).toLocaleString('fr') + ' k'}
+          <div className="text-[9px] text-amber-700 font-semibold">
+            Brisage : {Math.round(brisVal).toLocaleString('fr')} k
+          </div>
+        )}
+        {profit !== null && (
+          <div className="text-[10px] font-bold mt-1 px-2 py-0.5 rounded-full inline-block"
+            style={{ background: profit >= 0 ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.1)',
+                     color: profit >= 0 ? '#047857' : '#B91C1C' }}>
+            Gain : {profit >= 0 ? '+' : ''}{Math.round(profit).toLocaleString('fr')} k
+            {roi !== null && <span className="ml-1 opacity-70">({roi >= 0 ? '+' : ''}{roi.toFixed(0)}%)</span>}
+          </div>
+        )}
+        {brisVal > 0 && profit === null && (
+          <div className="text-[9px] font-bold px-2 py-0.5 rounded-full inline-block"
+            style={{ background: 'rgba(196,154,59,.12)', color: '#8B6914' }}>
+            ≈ {Math.round(brisVal).toLocaleString('fr')} k
           </div>
         )}
       </div>
     </button>
+  )
+}
+
+// ─── PAGE INGRÉDIENT (ressource non-équipement) ──────────────
+function IngredientDetail({ item, hdv, onBack, onIngredientClick }) {
+  // item = { ankama_id, name, price, img_url, type, level }
+  // Cherche les équipements qui utilisent cet ingrédient dans leur recette
+  return (
+    <div className="animate-fadeUp">
+      <button onClick={onBack}
+        className="flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900 mb-4">
+        <ArrowLeft className="w-4 h-4" /> Retour
+      </button>
+
+      <div className="bg-white/80 backdrop-blur-xl rounded-3xl border border-white shadow-xl overflow-hidden">
+        {/* Hero */}
+        <div className="p-6 md:p-8 flex flex-col md:flex-row items-center gap-6"
+          style={{ background: 'linear-gradient(135deg,#F0F4FF,#E8E0FF)' }}>
+          <div className="w-24 h-24 rounded-2xl bg-white/60 shadow-lg flex items-center justify-center">
+            {item.img_url
+              ? <img src={item.img_url} className="w-20 h-20 object-contain"
+                  onError={e => { e.target.style.display = 'none' }} alt="" />
+              : <span className="text-5xl">📦</span>}
+          </div>
+          <div className="flex-1 text-center md:text-left">
+            <div className="text-[10px] font-bold text-purple-700 uppercase tracking-widest mb-1">
+              {item.type || 'Ressource'}{item.level > 1 ? ' · Niveau ' + item.level : ''}
+            </div>
+            <h2 className="text-3xl font-bold" style={{ fontFamily: FD }}>{item.name}</h2>
+            <div className="flex flex-wrap gap-2 mt-3 justify-center md:justify-start">
+              <span className="px-3 py-1 rounded-full text-xs font-bold"
+                style={{ background: 'rgba(126,87,194,.1)', color: '#7E57C2' }}>
+                Ressource / Ingrédient
+              </span>
+              {item.price > 0 && (
+                <span className="px-3 py-1 rounded-full text-xs font-bold"
+                  style={{ background: 'rgba(45,74,175,.1)', color: '#2D4AAF' }}>
+                  HDV : {item.price.toLocaleString('fr')} k
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-6 md:p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Prix de marché */}
+          <Sec title="Prix de marché (HDV)">
+            {item.price > 0 ? (
+              <div className="rounded-2xl p-4 border text-center"
+                style={{ background: 'rgba(45,74,175,.08)', borderColor: '#2D4AAF' }}>
+                <div className="flex items-center justify-center gap-1 text-[10px] font-bold text-slate-500 uppercase mb-1">
+                  <ShoppingCart className="w-3 h-3" /> Prix unitaire
+                </div>
+                <div className="text-2xl font-bold" style={{ fontFamily: MN, color: '#2D4AAF' }}>
+                  {item.price.toLocaleString('fr')} k
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 italic">Prix non disponible — Sync HDV requis.</p>
+            )}
+          </Sec>
+
+          {/* Obtention */}
+          <Sec title="Comment l'obtenir">
+            <div className="space-y-2">
+              {item.price > 0 && (
+                <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-blue-50/60 border border-blue-100">
+                  <ShoppingCart className="w-4 h-4 text-blue-600 shrink-0" />
+                  <div>
+                    <div className="font-semibold text-sm text-slate-800">Hôtel des Ventes</div>
+                    <div className="text-[10px] text-slate-500">{item.price.toLocaleString('fr')} k l'unité</div>
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-purple-50/60 border border-purple-100">
+                <span className="text-lg shrink-0">👹</span>
+                <div>
+                  <div className="font-semibold text-sm text-slate-800">Drop sur monstres</div>
+                  <div className="text-[10px] text-slate-500">Consultez le Dofus Encyclopedia pour les détails</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-green-50/60 border border-green-100">
+                <Wrench className="w-4 h-4 text-green-600 shrink-0" />
+                <div>
+                  <div className="font-semibold text-sm text-slate-800">Métiers</div>
+                  <div className="text-[10px] text-slate-500">Craftable selon votre serveur</div>
+                </div>
+              </div>
+            </div>
+          </Sec>
+        </div>
+      </div>
+    </div>
   )
 }
 
