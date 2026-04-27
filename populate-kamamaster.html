@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concassage Lab — Population KamaMaster</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:2rem}
+    .c{max-width:860px;margin:0 auto}
+    h1{font-size:1.8rem;margin-bottom:.3rem}
+    .sub{color:#94a3b8;margin-bottom:1.5rem;font-size:.9rem}
+    .card{background:#1e293b;border-radius:1rem;padding:1.5rem;margin-bottom:1rem;border:1px solid #334155}
+    .pb{width:100%;height:12px;background:#334155;border-radius:99px;overflow:hidden;margin:.75rem 0}
+    .pf{height:100%;border-radius:99px;transition:width .3s}
+    .st{display:flex;justify-content:space-between;padding:.25rem 0;font-size:.85rem}
+    .sv{font-weight:700;font-family:monospace}
+    .log{background:#0f172a;border-radius:.5rem;padding:.75rem 1rem;max-height:340px;overflow-y:auto;font-family:monospace;font-size:.75rem;line-height:1.7;color:#94a3b8;margin-top:.75rem;border:1px solid #1e293b}
+    .log .ok{color:#4ade80}.log .err{color:#f87171}.log .info{color:#60a5fa}.log .warn{color:#fbbf24}
+    .btn{display:inline-flex;align-items:center;gap:.5rem;background:linear-gradient(135deg,#3b82f6,#8b5cf6);color:white;border:none;padding:.7rem 1.6rem;border-radius:99px;font-size:.9rem;font-weight:700;cursor:pointer;margin:.25rem;transition:all .2s}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 20px rgba(59,130,246,.4)}
+    .btn.red{background:linear-gradient(135deg,#ef4444,#b91c1c)}
+    .btn.green{background:linear-gradient(135deg,#10b981,#047857)}
+    .info-box{background:#1e3a5f;border:1px solid #2563eb;padding:1rem;border-radius:.5rem;margin-bottom:1rem;font-size:.82rem;color:#93c5fd;line-height:1.6}
+    .warn-box{background:#431407;border:1px solid #dc2626;padding:1rem;border-radius:.5rem;margin-bottom:1rem;font-size:.82rem;color:#fca5a5}
+    .field{margin:.5rem 0}.field label{font-size:.78rem;color:#64748b;display:block;margin-bottom:.2rem}
+    .field input,.field select{width:100%;padding:.45rem .6rem;border-radius:.5rem;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-family:monospace;font-size:.75rem}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+    .step{display:flex;align-items:center;gap:.75rem;padding:.6rem 0;border-bottom:1px solid #1e293b}
+    .step:last-child{border:none}
+    .step-num{width:28px;height:28px;border-radius:50%;background:#3b82f6;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;flex-shrink:0}
+    .step-num.done{background:#10b981}
+    .step-num.error{background:#ef4444}
+    .badge{display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.7rem;font-weight:700;margin-left:.5rem}
+    .badge-ok{background:#064e3b;color:#4ade80}
+    .badge-warn{background:#422006;color:#fbbf24}
+    .tabs{display:flex;gap:.5rem;margin-bottom:1rem}
+    .tab{padding:.5rem 1rem;border-radius:.5rem;font-size:.85rem;cursor:pointer;border:1px solid #334155;background:#1e293b;color:#94a3b8;transition:all .2s}
+    .tab.active{background:#3b82f6;color:white;border-color:#3b82f6}
+    #done{display:none;text-align:center;padding:2rem;color:#4ade80;font-size:1.4rem;font-weight:700}
+  </style>
+</head>
+<body>
+<div class="c">
+  <h1>⚒️ Population KamaMaster v1</h1>
+  <p class="sub">Source unique de vérité : équipements + prix HDV depuis KamaMaster</p>
+
+  <div class="info-box">
+    <strong>Ordre d'exécution recommandé :</strong><br>
+    1. Exécute <code>supabase/schema-v2.sql</code> dans ton SQL Editor Supabase (vide les items, crée hdv_prices)<br>
+    2. Lance <strong>Phase 1</strong> ici pour importer les équipements depuis KamaMaster<br>
+    3. Lance <strong>Phase 2</strong> pour synchroniser les prix HDV d'un serveur
+  </div>
+
+  <div class="warn-box">
+    ⚠️ <strong>Phase 1 efface et remplace toute la table items.</strong> Assure-toi d'avoir fait le schema-v2.sql avant.
+  </div>
+
+  <div class="card">
+    <h3 style="margin-bottom:.75rem">🔑 Supabase</h3>
+    <div class="grid2">
+      <div class="field"><label>URL</label><input id="sbUrl" value="https://eumzlpppmshfgkubyysa.supabase.co" /></div>
+      <div class="field"><label>ANON KEY</label><input id="sbKey" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bXpscHBwbXNoZmdrdWJ5eXNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMzE2NTksImV4cCI6MjA5MjYwNzY1OX0.oAxcY9MeuxOZZ5vLBgosfCo810bv_InghMWU_2Oikp0" /></div>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <div class="tab active" id="tab1" onclick="showTab(1)">📦 Phase 1 — Équipements</div>
+    <div class="tab" id="tab2" onclick="showTab(2)">💰 Phase 2 — Prix HDV</div>
+  </div>
+
+  <!-- PHASE 1 -->
+  <div id="panel1">
+    <div class="card">
+      <h3>📦 Phase 1 : Importer les équipements depuis KamaMaster</h3>
+      <p style="color:#94a3b8;font-size:.85rem;margin:.5rem 0">Récupère <strong>/api/equipement/all</strong>, filtre les 17 types brisables, insère dans Supabase.</p>
+      <button class="btn" id="btn1" onclick="runPhase1()">🚀 Lancer Phase 1</button>
+    </div>
+    <div class="card" id="status1" style="display:none">
+      <div id="steps1"></div>
+      <div class="pb"><div class="pf" id="bar1" style="width:0%;background:linear-gradient(90deg,#3b82f6,#8b5cf6)"></div></div>
+      <div id="stat1"></div>
+      <div class="log" id="log1"></div>
+    </div>
+  </div>
+
+  <!-- PHASE 2 -->
+  <div id="panel2" style="display:none">
+    <div class="card">
+      <h3>💰 Phase 2 : Synchroniser les prix HDV</h3>
+      <p style="color:#94a3b8;font-size:.85rem;margin:.5rem 0">Récupère <strong>/api/hdv/serveur</strong> et stocke dans la table <code>hdv_prices</code>.</p>
+      <div class="field" style="max-width:250px;margin:.75rem 0">
+        <label>Serveur</label>
+        <select id="hdvServer">
+          <option>Imagiro</option><option>Draconiros</option><option>Tylezia</option>
+          <option>Hell Mina</option><option>Brial</option><option>Dakal</option>
+          <option>Kourial</option><option>Mikhal</option><option>Ombre</option>
+          <option>Orukam</option><option>Rafal</option><option>Salar</option>
+          <option>Tal Kasha</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+        <button class="btn green" id="btn2" onclick="runPhase2()">💰 Sync Prix HDV</button>
+        <button class="btn" onclick="syncAllServers()" id="btnAll">🌍 Sync TOUS les serveurs</button>
+      </div>
+    </div>
+    <div class="card" id="status2" style="display:none">
+      <div class="pb"><div class="pf" id="bar2" style="width:0%;background:linear-gradient(90deg,#10b981,#059669)"></div></div>
+      <div id="stat2"></div>
+      <div class="log" id="log2"></div>
+    </div>
+  </div>
+
+  <div id="done" class="card">🎉 Opération terminée !<br><span style="font-size:1rem;color:#94a3b8">Rafraîchis ton site pour voir les données.</span></div>
+</div>
+
+<script>
+var KM = 'https://api.kamamaster.fr';
+
+// Types d'équipements brisables — correspondance type.name KamaMaster
+var EQUIP_TYPES = new Set([
+  'Amulette','Anneau','Chapeau','Cape','Ceinture','Bottes',
+  'Bouclier','Épée','Arc','Baguette','Bâton','Dague',
+  'Marteau','Pelle','Hache','Faux','Pioche',
+  // Variantes possibles retournées par KamaMaster
+  'Epée', 'Baton',
+]);
+
+// Normalise le type (accents, variantes)
+function normType(t) {
+  var m = {'Epée':'Épée','Baton':'Bâton','Faulx':'Faux','epee':'Épée'};
+  return m[t] || t;
+}
+
+function sbHdr(key) {
+  return {
+    'apikey': key, 'Authorization': 'Bearer ' + key,
+    'Content-Type': 'application/json',
+    'Prefer': 'resolution=merge-duplicates,return=minimal'
+  };
+}
+
+// ─── Logging helpers ────────────────────────────────────────
+function log(id, msg, cls) {
+  var box = document.getElementById('log' + id);
+  var d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = new Date().toLocaleTimeString() + ' — ' + msg;
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+
+function setBar(id, pct, label) {
+  document.getElementById('bar' + id).style.width = pct + '%';
+  if (document.getElementById('stat' + id)) {
+    document.getElementById('stat' + id).innerHTML = label || '';
+  }
+}
+
+// ─── Tabs ───────────────────────────────────────────────────
+function showTab(n) {
+  document.getElementById('panel1').style.display = n === 1 ? '' : 'none';
+  document.getElementById('panel2').style.display = n === 2 ? '' : 'none';
+  document.getElementById('tab1').className = 'tab' + (n === 1 ? ' active' : '');
+  document.getElementById('tab2').className = 'tab' + (n === 2 ? ' active' : '');
+}
+
+// ─── Supabase helpers ────────────────────────────────────────
+async function sbInsertBatch(url, key, table, rows) {
+  if (!rows.length) return;
+  var r = await fetch(url + '/rest/v1/' + table, {
+    method: 'POST', headers: sbHdr(key), body: JSON.stringify(rows)
+  });
+  if (!r.ok) throw new Error(table + ' insert: ' + r.status + ' ' + (await r.text()).substring(0, 200));
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── Parse effects KamaMaster → format interne ──────────────
+function parseEffects(effects) {
+  return (effects || [])
+    .filter(function(e) {
+      var id = e.type && e.type.id;
+      return id !== undefined && id !== null && id !== -1 && e.int_maximum > 0;
+    })
+    .map(function(e) {
+      return {
+        stat_id:   e.type.id,
+        stat_name: e.type.name || '',
+        min:       e.int_minimum || 0,
+        max:       e.int_maximum || 0,
+      };
+    });
+}
+
+// ─── Parse recipe KamaMaster → format interne ───────────────
+function parseRecipe(recipe) {
+  return (recipe || [])
+    .filter(function(r) { return r.item_ankama_id && r.quantity; })
+    .map(function(r) {
+      return { ankama_id: r.item_ankama_id, quantity: r.quantity };
+    });
+}
+
+// ─── PHASE 1 : Import équipements ───────────────────────────
+async function runPhase1() {
+  var sbUrl = document.getElementById('sbUrl').value.trim();
+  var sbKey  = document.getElementById('sbKey').value.trim();
+  if (!sbUrl || !sbKey) { alert('Remplis Supabase URL et clé !'); return; }
+
+  document.getElementById('btn1').disabled = true;
+  document.getElementById('btn1').textContent = '⏳ En cours…';
+  document.getElementById('status1').style.display = '';
+
+  try {
+    // Test connexion
+    log(1, '🔌 Test connexion Supabase…', 'info');
+    var tr = await fetch(sbUrl + '/rest/v1/items?select=id&limit=1', { headers: sbHdr(sbKey) });
+    if (!tr.ok) throw new Error('Supabase: HTTP ' + tr.status);
+    log(1, '✅ Supabase OK', 'ok');
+
+    // Fetch équipements KamaMaster
+    log(1, '📥 Chargement équipements depuis KamaMaster…', 'info');
+    setBar(1, 5, '<span style="color:#60a5fa">Chargement depuis KamaMaster…</span>');
+    var kmResp = await fetch(KM + '/api/equipement/all');
+    if (!kmResp.ok) throw new Error('KamaMaster /api/equipement/all : HTTP ' + kmResp.status);
+    var kmData = await kmResp.json();
+
+    // Format: {items: [...]}
+    var allItems = kmData.items || kmData.data || (Array.isArray(kmData) ? kmData : []);
+    log(1, '📊 ' + allItems.length + ' items reçus de KamaMaster', 'info');
+
+    // Filtrer équipements brisables
+    var equips = allItems.filter(function(it) {
+      var t = it.type && (it.type.name || it.type);
+      return EQUIP_TYPES.has(t);
+    });
+    log(1, '🗡️ ' + equips.length + ' équipements brisables (types filtrés)', 'ok');
+    setBar(1, 10, '<span style="color:#4ade80">' + equips.length + ' équipements à insérer</span>');
+
+    // Préparer les lignes
+    var rows = equips.map(function(it) {
+      var typeName = it.type && (it.type.name || it.type);
+      typeName = normType(typeName);
+      return {
+        dofus_id:    it.ankama_id,
+        ankama_id:   it.ankama_id,
+        name:        it.name || ('Item #' + it.ankama_id),
+        level:       it.level || 1,
+        type:        typeName,
+        description: it.description || '',
+        img_url:     (it.image_urls && it.image_urls.icon) || null,
+        effects:     parseEffects(it.effects),
+        recipe:      parseRecipe(it.recipe),
+        drops:       [],
+      };
+    });
+
+    // Insérer par batch de 200
+    var BS = 200, total = rows.length, inserted = 0;
+    for (var i = 0; i < rows.length; i += BS) {
+      var batch = rows.slice(i, i + BS);
+      await sbInsertBatch(sbUrl, sbKey, 'items', batch);
+      inserted += batch.length;
+      var pct = Math.round(10 + (inserted / total) * 88);
+      setBar(1, pct, '<span>Insérés : <strong style="color:#4ade80">' + inserted + '</strong> / ' + total + '</span>');
+      if (inserted % 1000 === 0 || inserted === total) {
+        log(1, '✅ ' + inserted + ' / ' + total + ' insérés', 'ok');
+      }
+      await sleep(80);
+    }
+
+    setBar(1, 100, '<span style="color:#4ade80"><strong>' + total + '</strong> équipements importés !</span>');
+    log(1, '🎉 Phase 1 terminée — ' + total + ' équipements dans Supabase !', 'ok');
+    document.getElementById('btn1').textContent = '✅ Terminé !';
+    document.getElementById('done').style.display = '';
+
+  } catch (e) {
+    log(1, '❌ ERREUR : ' + e.message, 'err');
+    document.getElementById('btn1').disabled = false;
+    document.getElementById('btn1').textContent = '🚀 Réessayer';
+  }
+}
+
+// ─── PHASE 2 : Sync Prix HDV ─────────────────────────────────
+async function runPhase2(server) {
+  var sbUrl = document.getElementById('sbUrl').value.trim();
+  var sbKey  = document.getElementById('sbKey').value.trim();
+  var srv = server || document.getElementById('hdvServer').value;
+
+  document.getElementById('btn2').disabled = true;
+  document.getElementById('btnAll').disabled = true;
+  document.getElementById('btn2').textContent = '⏳ Sync ' + srv + '…';
+  document.getElementById('status2').style.display = '';
+
+  try {
+    log(2, '📡 Chargement prix HDV — ' + srv + '…', 'info');
+    setBar(2, 10, '<span style="color:#60a5fa">Fetch KamaMaster…</span>');
+
+    var r = await fetch(KM + '/api/hdv/serveur?serveurName=' + encodeURIComponent(srv));
+    if (!r.ok) throw new Error('KamaMaster HDV: HTTP ' + r.status);
+    var data = await r.json();
+
+    var items = Array.isArray(data) ? data : (data.items || data.data || []);
+    log(2, '📊 ' + items.length + ' items reçus pour ' + srv, 'info');
+
+    // Normaliser
+    var rows = items
+      .filter(function(it) { return it.ankamaId && it.price; })
+      .map(function(it) {
+        return {
+          ankama_id: it.ankamaId,
+          name:      it.name || ('Item #' + it.ankamaId),
+          price:     parseInt(it.price) || 0,
+          server:    srv,
+          type:      it.type || '',
+          level:     it.level || 1,
+          img_url:   (it.image_urls && it.image_urls.icon) || null,
+        };
+      })
+      .filter(function(r) { return r.price > 0; });
+
+    log(2, '💰 ' + rows.length + ' items avec prix > 0', 'ok');
+    setBar(2, 30, '<span>' + rows.length + ' prix à insérer…</span>');
+
+    // Upsert par batch de 500
+    var BS = 500, inserted = 0;
+    for (var i = 0; i < rows.length; i += BS) {
+      var batch = rows.slice(i, i + BS);
+      // Utiliser upsert (POST avec Prefer: resolution=merge-duplicates)
+      var res = await fetch(sbUrl + '/rest/v1/hdv_prices', {
+        method: 'POST', headers: sbHdr(sbKey), body: JSON.stringify(batch)
+      });
+      if (!res.ok) throw new Error('HDV insert: ' + res.status + ' ' + (await res.text()).substring(0, 150));
+      inserted += batch.length;
+      var pct = Math.round(30 + (inserted / rows.length) * 68);
+      setBar(2, pct, '<span>Insérés : <strong style="color:#4ade80">' + inserted + '</strong> / ' + rows.length + '</span>');
+      await sleep(50);
+    }
+
+    log(2, '🎉 ' + srv + ' : ' + rows.length + ' prix synchronisés !', 'ok');
+    setBar(2, 100, '<span style="color:#4ade80"><strong>' + rows.length + '</strong> prix pour ' + srv + ' !</span>');
+    document.getElementById('btn2').textContent = '💰 Sync Prix HDV';
+    document.getElementById('done').style.display = '';
+    return rows.length;
+
+  } catch (e) {
+    log(2, '❌ ERREUR ' + srv + ' : ' + e.message, 'err');
+    return 0;
+  } finally {
+    document.getElementById('btn2').disabled = false;
+    document.getElementById('btnAll').disabled = false;
+  }
+}
+
+async function syncAllServers() {
+  var servers = ['Imagiro','Draconiros','Tylezia','Hell Mina','Brial','Dakal',
+    'Kourial','Mikhal','Ombre','Orukam','Rafal','Salar','Tal Kasha'];
+  document.getElementById('btnAll').disabled = true;
+  document.getElementById('btn2').disabled = true;
+  document.getElementById('status2').style.display = '';
+
+  var total = 0;
+  for (var i = 0; i < servers.length; i++) {
+    log(2, '🌍 Sync serveur ' + (i+1) + '/' + servers.length + ' : ' + servers[i] + '…', 'info');
+    document.getElementById('hdvServer').value = servers[i];
+    var n = await runPhase2(servers[i]);
+    total += n;
+    await sleep(300); // Pause entre serveurs
+  }
+  log(2, '🎉 TOUS LES SERVEURS synchronisés ! ' + total + ' prix au total.', 'ok');
+}
+</script>
+</body>
+</html>

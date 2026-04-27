@@ -4,12 +4,12 @@ var db = null
 try {
   var u = import.meta.env.VITE_SUPABASE_URL
   var k = import.meta.env.VITE_SUPABASE_ANON_KEY
-  if (u && k) { db = createClient(u, k) }
+  if (u && k) db = createClient(u, k)
 } catch (e) { console.error('Supabase init:', e) }
 
 export { db }
 
-export var SERVERS = ['Imagiro', 'Ilyzaelle', 'Draconiros', 'Tylezia', 'Hell Mina', 'Oshimo', 'Herdegrize', 'Brutas']
+// ─── Équipements ─────────────────────────────────────────────
 
 export async function getItems(search, lvMin, lvMax, type, page, sortField, sortAsc) {
   if (!db) return { data: [], count: 0 }
@@ -26,18 +26,18 @@ export async function getItems(search, lvMin, lvMax, type, page, sortField, sort
   } catch (e) { return { data: [], count: 0 } }
 }
 
-export async function getItemByName(name) {
-  if (!db || !name) return null
+export async function getItemByAnkamaId(ankamaId) {
+  if (!db || !ankamaId) return null
   try {
-    var r = await db.from('items').select('*').ilike('name', '%' + name + '%').limit(1).single()
+    var r = await db.from('items').select('*').eq('ankama_id', ankamaId).limit(1).single()
     return r.data || null
   } catch (e) { return null }
 }
 
-export async function getItemById(id) {
-  if (!db) return null
+export async function getItemByName(name) {
+  if (!db || !name) return null
   try {
-    var r = await db.from('items').select('*').eq('id', id).single()
+    var r = await db.from('items').select('*').ilike('name', '%' + name + '%').limit(1).single()
     return r.data || null
   } catch (e) { return null }
 }
@@ -56,13 +56,46 @@ export async function getAllItems(onProgress) {
   return all
 }
 
+// ─── Prix HDV ────────────────────────────────────────────────
+
+// Retourne un map ankama_id → {name, price, img_url, type, level}
+export async function getHdvPrices(server) {
+  if (!db) return {}
+  try {
+    var all = [], off = 0, limit = 1000, more = true
+    while (more) {
+      var r = await db.from('hdv_prices').select('ankama_id,name,price,img_url,type,level')
+        .eq('server', server).range(off, off + limit - 1)
+      var b = r.data || []; all = all.concat(b); off += limit
+      if (b.length < limit) more = false
+    }
+    var map = {}
+    for (var i = 0; i < all.length; i++) {
+      var item = all[i]
+      map[item.ankama_id] = item
+    }
+    return map
+  } catch (e) { console.error('getHdvPrices:', e); return {} }
+}
+
+export async function bulkUpsertHdvPrices(rows) {
+  if (!db || !rows || !rows.length) return
+  var bs = 500
+  for (var i = 0; i < rows.length; i += bs) {
+    try {
+      await db.from('hdv_prices').upsert(rows.slice(i, i + bs), { onConflict: 'ankama_id,server' })
+    } catch (e) { console.error('bulkUpsertHdvPrices batch:', e) }
+  }
+}
+
+// ─── Prix runes (table legacy, pour overrides manuels) ───────
+
 export async function getRunePrices(server) {
   if (!db) return []
   try {
     var q = db.from('rune_prices').select('*').order('price', { ascending: false })
     if (server) q = q.eq('server', server)
-    var r = await q
-    return r.data || []
+    var r = await q; return r.data || []
   } catch (e) { return [] }
 }
 
@@ -70,20 +103,8 @@ export async function setRunePrice(name, price, server) {
   if (!db) return
   try {
     await db.from('rune_prices').upsert(
-      { name: name, price: price, server: server || 'Imagiro' },
+      { name, price, server: server || 'Imagiro' },
       { onConflict: 'name,server' }
     )
   } catch (e) { console.error('setRunePrice:', e) }
-}
-
-export async function bulkSetRunePrices(priceMap, server) {
-  if (!db || !priceMap) return
-  var srv = server || 'Imagiro'
-  var rows = Object.entries(priceMap).map(function(e) {
-    return { name: e[0], price: Math.round(e[1]), server: srv }
-  })
-  if (!rows.length) return
-  try {
-    await db.from('rune_prices').upsert(rows, { onConflict: 'name,server' })
-  } catch (e) { console.error('bulkSetRunePrices:', e) }
 }
