@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Concassage Lab — Réparation Recettes</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;padding:2rem}
+    .c{max-width:800px;margin:0 auto}
+    h1{font-size:2rem;margin-bottom:.5rem}
+    .sub{color:#94a3b8;margin-bottom:2rem}
+    .card{background:#1e293b;border-radius:1rem;padding:1.5rem;margin-bottom:1rem;border:1px solid #334155}
+    .pb{width:100%;height:14px;background:#334155;border-radius:99px;overflow:hidden;margin:1rem 0}
+    .pf{height:100%;background:linear-gradient(90deg,#f59e0b,#ef4444);border-radius:99px;transition:width .3s}
+    .st{display:flex;justify-content:space-between;padding:.3rem 0;font-size:.9rem}
+    .sv{font-weight:700;color:#f59e0b;font-family:monospace}
+    .log{background:#0f172a;border-radius:.5rem;padding:1rem;max-height:400px;overflow-y:auto;font-family:monospace;font-size:.78rem;line-height:1.6;color:#94a3b8;margin-top:1rem}
+    .log .ok{color:#4ade80}.log .err{color:#f87171}.log .info{color:#60a5fa}.log .warn{color:#fbbf24}
+    button{background:linear-gradient(135deg,#f59e0b,#ef4444);color:white;border:none;padding:.8rem 2rem;border-radius:99px;font-size:1rem;font-weight:700;cursor:pointer;margin-top:.5rem;transition:all .2s}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    button:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 20px rgba(245,158,11,.4)}
+    .info-box{background:#1e3a5f;border:1px solid #2563eb;padding:1rem;border-radius:.5rem;margin-bottom:1rem;font-size:.85rem;color:#93c5fd}
+    .field{margin:.5rem 0}.field label{font-size:.8rem;color:#64748b;display:block;margin-bottom:.2rem}
+    .field input{width:100%;padding:.5rem;border-radius:.5rem;border:1px solid #475569;background:#0f172a;color:#e2e8f0;font-family:monospace;font-size:.75rem}
+    .done{color:#4ade80;font-size:1.3rem;font-weight:700;text-align:center;padding:2rem}
+    .badge{display:inline-block;padding:.2rem .6rem;border-radius:99px;font-size:.75rem;font-weight:700;margin-left:.5rem}
+    .badge-warn{background:#7c3b0020;border:1px solid #d97706;color:#fbbf24}
+    .badge-ok{background:#064e3b20;border:1px solid #059669;color:#4ade80}
+  </style>
+</head>
+<body>
+<div class="c">
+  <h1>🔧 Réparation des Recettes</h1>
+  <p class="sub">Corrige les recettes "Item #undefined ×undefined" depuis DofusDB → Supabase</p>
+
+  <div class="info-box">
+    <strong>Comment ça marche ?</strong><br>
+    Ce script détecte les recettes cassées dans ta base (ingrédients avec nom undefined ou Item #NaN),
+    re-fetche la vraie recette depuis l'API DofusDB avec le bon format d'ingrédients, et met à jour Supabase.
+    <br><br>
+    <strong>Pourquoi ça cassait ?</strong> L'API DofusDB retourne les ingrédients comme un tableau d'IDs séparés
+    des quantités (dans <code>quantities[]</code>), pas comme des objets avec <code>itemId</code>.
+  </div>
+
+  <div class="card">
+    <h3>🔑 Supabase</h3>
+    <div class="field"><label>URL</label><input id="sbUrl" value="https://eumzlpppmshfgkubyysa.supabase.co" /></div>
+    <div class="field"><label>ANON KEY</label><input id="sbKey" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1bXpscHBwbXNoZmdrdWJ5eXNhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwMzE2NTksImV4cCI6MjA5MjYwNzY1OX0.oAxcY9MeuxOZZ5vLBgosfCo810bv_InghMWU_2Oikp0" /></div>
+  </div>
+
+  <div class="card">
+    <h3>⚙️ Options</h3>
+    <div style="margin:.5rem 0">
+      <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+        <input type="checkbox" id="fixAllRecipes"> <strong>Tout re-fetcher</strong> (même les recettes déjà renseignées — plus long)
+      </label>
+    </div>
+    <div class="field" style="margin-top:.75rem"><label>Délai entre requêtes (ms)</label><input id="delay" type="number" value="120" style="width:80px" /></div>
+  </div>
+
+  <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+    <button id="startBtn" onclick="go()">🚀 Réparer les recettes</button>
+    <span id="elapsed" style="font-size:.8rem;color:#64748b"></span>
+  </div>
+
+  <div class="card" id="statusCard" style="display:none">
+    <h3>📊 Progression <span id="badgeTotal" class="badge badge-warn"></span></h3>
+    <div class="pb"><div class="pf" id="bar" style="width:0%"></div></div>
+    <div id="statsDiv"></div>
+    <div class="log" id="logBox"></div>
+  </div>
+
+  <div id="doneMsg" style="display:none" class="card done"></div>
+</div>
+
+<script>
+var DOFUSDB = 'https://api.dofusdb.fr';
+var ct = {checked:0,fixed:0,alreadyOk:0,noRecipe:0,errors:0};
+var startTime = null;
+
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms)})}
+
+function log(msg,type){
+  var box=document.getElementById('logBox');
+  var div=document.createElement('div');
+  if(type)div.className=type;
+  div.textContent=new Date().toLocaleTimeString()+' — '+msg;
+  box.appendChild(div);box.scrollTop=box.scrollHeight;
+}
+
+function updateUI(progress){
+  document.getElementById('bar').style.width=progress+'%';
+  document.getElementById('statsDiv').innerHTML=
+    '<div class="st"><span>Vérifiés</span><span class="sv">'+ct.checked+'</span></div>'+
+    '<div class="st"><span>Réparés ✅</span><span class="sv" style="color:#4ade80">'+ct.fixed+'</span></div>'+
+    '<div class="st"><span>Déjà OK</span><span class="sv" style="color:#94a3b8">'+ct.alreadyOk+'</span></div>'+
+    '<div class="st"><span>Sans recette</span><span class="sv" style="color:#94a3b8">'+ct.noRecipe+'</span></div>'+
+    '<div class="st"><span>Erreurs</span><span class="sv" style="color:#f87171">'+ct.errors+'</span></div>';
+  if(startTime){var s=Math.round((Date.now()-startTime)/1000);document.getElementById('elapsed').textContent='Temps: '+Math.floor(s/60)+'m '+s%60+'s'}
+}
+
+function sbHeaders(key){
+  return{'apikey':key,'Authorization':'Bearer '+key,'Content-Type':'application/json','Prefer':'return=minimal'}
+}
+
+// Vérifie si une recette contient des ingrédients cassés
+function isBrokenRecipe(recipe){
+  if(!recipe||!Array.isArray(recipe)||recipe.length===0)return false;
+  for(var i=0;i<recipe.length;i++){
+    var r=recipe[i];
+    if(!r.n||r.n==='undefined'||r.n.includes('#undefined')||r.n.includes('NaN')||r.q===undefined||r.q==='undefined')return true;
+  }
+  return false;
+}
+
+// Fetche la recette depuis DofusDB en gérant les deux formats possibles
+async function fetchRecipeFromDofusDB(itemId, delay){
+  var d = delay || 120;
+  try{
+    var r=await fetch(DOFUSDB+'/recipes?resultId='+itemId+'&$limit=1');
+    if(!r.ok)return null;
+    var data=await r.json();
+    if(!data.data||!data.data[0])return null;
+
+    var rec=data.data[0];
+    var quantities=rec.quantities||[];   // [4, 2, 1]
+    var ingredients=rec.ingredients||[]; // [456, 789, 101] OU [{id:456,...}, ...]
+
+    if(!ingredients.length)return[];
+
+    var result=[];
+    for(var i=0;i<ingredients.length;i++){
+      // Format A : ingredient est un nombre (ID)
+      var itemId2 = typeof ingredients[i]==='number' ? ingredients[i] : (ingredients[i].id||ingredients[i].itemId||null);
+      var qty = quantities[i] || (typeof ingredients[i]==='object'?ingredients[i].quantity:1) || 1;
+
+      if(!itemId2){log('⚠️ Ingrédient #'+i+' sans ID pour item '+itemId,'warn');continue;}
+
+      // Fetch le nom de l'ingrédient
+      var name = 'Item #'+itemId2;
+      try{
+        await sleep(d);
+        var ir=await fetch(DOFUSDB+'/items/'+itemId2+'?$select[]=name');
+        if(ir.ok){var id=await ir.json();name=(id.name&&id.name.fr)||name}
+      }catch(e){/* garde le nom par défaut */}
+
+      result.push({n:name,q:qty});
+    }
+    return result;
+  }catch(e){return null;}
+}
+
+// Fetche tous les items Supabase (pagination)
+async function fetchAllItems(sbUrl, sbKey){
+  var all=[],offset=0,limit=1000;
+  while(true){
+    var r=await fetch(sbUrl+'/rest/v1/items?select=id,dofus_id,name,recipe&order=id.asc&offset='+offset+'&limit='+limit,{
+      headers:Object.assign({},sbHeaders(sbKey),{'Range':'0-999','Prefer':'count=exact'})
+    });
+    if(!r.ok)throw new Error('Supabase items: '+r.status);
+    var d=await r.json();
+    if(!d.length)break;
+    all=all.concat(d);
+    if(d.length<limit)break;
+    offset+=limit;
+  }
+  return all;
+}
+
+// Met à jour la recette d'un item dans Supabase
+async function updateRecipe(sbUrl, sbKey, itemId, recipe){
+  var r=await fetch(sbUrl+'/rest/v1/items?id=eq.'+itemId,{
+    method:'PATCH',
+    headers:sbHeaders(sbKey),
+    body:JSON.stringify({recipe:recipe})
+  });
+  if(!r.ok)throw new Error('PATCH failed: '+r.status+' '+await r.text());
+}
+
+async function go(){
+  var sbUrl=document.getElementById('sbUrl').value.trim();
+  var sbKey=document.getElementById('sbKey').value.trim();
+  var fixAll=document.getElementById('fixAllRecipes').checked;
+  var delay=parseInt(document.getElementById('delay').value)||120;
+
+  if(!sbUrl||!sbKey){alert('Remplis URL et clé Supabase !');return}
+
+  document.getElementById('startBtn').disabled=true;
+  document.getElementById('startBtn').textContent='⏳ En cours…';
+  document.getElementById('statusCard').style.display='block';
+  startTime=Date.now();ct={checked:0,fixed:0,alreadyOk:0,noRecipe:0,errors:0};
+
+  log('🔌 Connexion Supabase…','info');
+  try{
+    var tr=await fetch(sbUrl+'/rest/v1/items?select=id&limit=1',{headers:sbHeaders(sbKey)});
+    if(!tr.ok)throw new Error('HTTP '+tr.status);
+    log('✅ Supabase OK','ok');
+  }catch(e){log('❌ Supabase: '+e.message,'err');alert('Connexion Supabase échouée');document.getElementById('startBtn').disabled=false;document.getElementById('startBtn').textContent='🚀 Réessayer';return}
+
+  log('📥 Chargement des items…','info');
+  var items;
+  try{items=await fetchAllItems(sbUrl,sbKey);log('📊 '+items.length+' items chargés','ok');}
+  catch(e){log('❌ Chargement: '+e.message,'err');document.getElementById('startBtn').disabled=false;return}
+
+  // Filtrer ceux à traiter
+  var toProcess=items.filter(function(it){
+    if(!it.dofus_id)return false; // pas d'ID DofusDB → skip
+    var recipe=it.recipe;
+    if(typeof recipe==='string'){try{recipe=JSON.parse(recipe)}catch(e){return true}}
+    if(fixAll)return true;
+    return isBrokenRecipe(recipe)||!recipe||recipe.length===0;
+  });
+
+  document.getElementById('badgeTotal').textContent=toProcess.length+' à réparer';
+  log('🔍 '+toProcess.length+' items à traiter (sur '+items.length+')','info');
+
+  for(var i=0;i<toProcess.length;i++){
+    var it=toProcess[i];
+    ct.checked++;
+    var progress=Math.round((i+1)/toProcess.length*100);
+
+    try{
+      var recipe=await fetchRecipeFromDofusDB(it.dofus_id, delay);
+
+      if(recipe===null){
+        ct.errors++;
+        if(ct.errors<=20)log('❌ Erreur fetch recette '+it.name+' (#'+it.dofus_id+')','err');
+      } else if(recipe.length===0){
+        ct.noRecipe++;
+        // Met à jour avec tableau vide pour marquer comme "pas de recette"
+        await updateRecipe(sbUrl,sbKey,it.id,[]);
+        if(ct.noRecipe<=5)log('ℹ️ '+it.name+' : pas de recette','info');
+      } else {
+        await updateRecipe(sbUrl,sbKey,it.id,recipe);
+        ct.fixed++;
+        if(ct.fixed<=30||ct.fixed%50===0)log('✅ '+it.name+' : '+recipe.length+' ingr. ('+recipe.map(function(r){return r.n+'×'+r.q}).join(', ')+')','ok');
+      }
+    }catch(e){
+      ct.errors++;
+      if(ct.errors<=20)log('❌ '+it.name+': '+e.message,'err');
+    }
+
+    updateUI(progress);
+    await sleep(delay);
+  }
+
+  updateUI(100);
+  var sec=Math.round((Date.now()-startTime)/1000);
+  log('🏁 TERMINÉ en '+Math.floor(sec/60)+'m '+(sec%60)+'s','ok');
+  log(ct.fixed+' réparés · '+ct.alreadyOk+' déjà OK · '+ct.noRecipe+' sans recette · '+ct.errors+' erreurs','ok');
+  document.getElementById('doneMsg').style.display='block';
+  document.getElementById('doneMsg').innerHTML='🎉 Recettes réparées !<br><br><span style="font-size:1rem;color:#94a3b8"><strong>'+ct.fixed+'</strong> recettes corrigées · <strong>'+ct.errors+'</strong> erreurs<br>Rafraîchis ton site !</span>';
+  document.getElementById('startBtn').textContent='✅ Terminé !';
+}
+</script>
+</body>
+</html>

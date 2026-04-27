@@ -69,8 +69,21 @@ export async function getRunePrices(server) {
 export async function setRunePrice(name, price, server) {
   if (!db) return
   try {
-    var q = db.from('rune_prices').update({ price: price }).eq('name', name)
-    if (server) q = q.eq('server', server)
-    await q
-  } catch (e) {}
+    await db.from('rune_prices').upsert(
+      { name: name, price: price, server: server || 'Imagiro' },
+      { onConflict: 'name,server' }
+    )
+  } catch (e) { console.error('setRunePrice:', e) }
+}
+
+export async function bulkSetRunePrices(priceMap, server) {
+  if (!db || !priceMap) return
+  var srv = server || 'Imagiro'
+  var rows = Object.entries(priceMap).map(function(e) {
+    return { name: e[0], price: Math.round(e[1]), server: srv }
+  })
+  if (!rows.length) return
+  try {
+    await db.from('rune_prices').upsert(rows, { onConflict: 'name,server' })
+  } catch (e) { console.error('bulkSetRunePrices:', e) }
 }
